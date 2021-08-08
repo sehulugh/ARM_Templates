@@ -1,0 +1,691 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "environmentName": {
+            "type": "string",
+            "defaultValue": "dev",
+            "metadata": {
+                "description": "Name of the environment"
+            }
+        },
+        "virtualNetworkName": {
+            "type": "string",
+            "defaultValue": "devtest-vnet",
+            "metadata": {
+                "description": "Name of the Virtual Network"
+            }
+        },
+        "virtualNetworkResourceGroup": {
+            "type": "string",
+            "defaultValue": "devtest-network",
+            "metadata": {
+                "description": "Name of the Virtual Network"
+            }
+        },
+        "dnsZoneName": {
+            "type": "string",
+            "defaultValue": "azure.interaction.com",
+            "metadata": {
+                "description": "name of the DNS zone to add the A record for this app gateway."
+            }
+        },
+        "certData": {
+            "type": "string",
+            "metadata": {
+                "description": "Base-64 encoded form of the .pfx file"
+            }
+        },
+        "certPassword": {
+            "type": "securestring",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Password for .pfx certificate"
+            }
+        },
+        "capacity": {
+            "type": "int",
+            "defaultValue": 2,
+            "metadata": {
+                "description": "Number of instances"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources."
+            }
+        },
+        "logAnalyticsWorkspace": {
+            "type": "string",
+            "defaultValue": "lower-workspace"
+        }
+    },
+    "variables": {
+        "applicationGatewayName": "[concat('gizmo-waf-v1-', parameters('environmentName'))]",
+        "publicIPAddressName": "[concat('gizmo-waf-v1-ip-', parameters('environmentName'))]",
+        "virtualNetworkName": "[parameters('virtualNetworkName')]",
+        "subnetName": "app-gateway",
+        "subnetRef": "[resourceId(parameters('virtualNetworkResourceGroup'), 'Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnetName'))]",
+        "publicIPRef": "[resourceId('Microsoft.Network/publicIPAddresses',variables('publicIPAddressName'))]",
+        "applicationGatewayID": "[resourceId('Microsoft.Network/applicationGateways',variables('applicationGatewayName'))]"
+    },
+    "resources": [
+        {
+            "apiVersion": "2018-08-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('publicIPAddressName')]",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "dnsSettings": {
+                    "domainNameLabel": "[variables('publicIPAddressName')]"
+                }
+            },
+            "resources": [
+                {
+                    "type": "providers/diagnosticSettings",
+                    "name": "Microsoft.Insights/iaMonitoring",
+                    "dependsOn": [
+                        "[variables('publicIPAddressName')]"
+                    ],
+                    "apiVersion": "2017-05-01-preview",
+                    "properties": {
+                        "name": "iaMonitoring",
+                        "workspaceId": "[resourceId('bf988e23-7a52-464f-8529-607f1571711d', 'monitoring', 'microsoft.operationalinsights/workspaces', parameters('logAnalyticsWorkspace'))]",
+                        "logs": [
+                            {
+                                "category": "DDoSProtectionNotifications",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            },
+                            {
+                                "category": "DDoSMitigationFlowLogs",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            },
+                            {
+                                "category": "DDoSMitigationReports",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            }
+                        ],
+                        "metrics": [
+                            {
+                                "category": "AllMetrics",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "enabled": false,
+                                    "days": 0
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "apiVersion": "2018-08-01",
+            "name": "[variables('applicationGatewayName')]",
+            "type": "Microsoft.Network/applicationGateways",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]"
+            ],
+            "properties": {
+                "enableHttp2": false,
+                "sku": {
+                    "name": "WAF_Medium",
+                    "tier": "WAF",
+                    "capacity": "[parameters('capacity')]"
+                },
+                "sslCertificates": [
+                    {
+                        "name": "appGatewayFrontEndSslCert",
+                        "properties": {
+                            "data": "[parameters('certData')]",
+                            "password": "[parameters('certPassword')]"
+                        }
+                    }
+                ],
+                "sslPolicy": {
+                    "policyType": "Predefined",
+                    "policyName": "AppGwSslPolicy20170401S"
+                },
+                "gatewayIPConfigurations": [
+                    {
+                        "name": "appGatewayIpConfig",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            }
+                        }
+                    }
+                ],
+                "frontendIPConfigurations": [
+                    {
+                        "name": "appGatewayFrontendIP",
+                        "properties": {
+                            "PublicIPAddress": {
+                                "id": "[variables('publicIPRef')]"
+                            }
+                        }
+                    }
+                ],
+                "frontendPorts": [
+                    {
+                        "name": "httpsFrontendPort",
+                        "properties": {
+                            "Port": 443
+                        }
+                    },
+                    {
+                        "name": "httpFrontendPort",
+                        "properties": {
+                            "Port": 80
+                        }
+                    }
+                ],
+                "backendAddressPools": [
+                    {
+                        "name": "authServiceBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-auth-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "authAdminBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-auth-admin-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoWebBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-web-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoOfficeBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-office-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoApiBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-gateway-api-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoEventBrokerBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-event-broker-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoCalendarSyncBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-calendar-sync-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "gizmoToolsBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-tools-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "dockerProxyBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-docker-proxy-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "officeHelpBackendPool",
+                        "properties": {
+                            "BackendAddresses": [
+                                {
+                                    "fqdn": "[concat('gizmo-office-help-', parameters('environmentName'), '.azurewebsites.net')]"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "probes": [
+                    {
+                        "name": "httpsRootProbe",
+                        "properties": {
+                            "protocol": "Https",
+                            "path": "/",
+                            "pickHostNameFromBackendHttpSettings": true,
+                            "interval": 30,
+                            "timeout": 30,
+                            "unhealthyThreshold": 3
+                        }
+                    },
+                    {
+                        "name": "httpsStatusProbe",
+                        "properties": {
+                            "protocol": "Https",
+                            "path": "/status",
+                            "pickHostNameFromBackendHttpSettings": true,
+                            "interval": 30,
+                            "timeout": 30,
+                            "unhealthyThreshold": 3
+                        }
+                    }
+                ],
+                "backendHttpSettingsCollection": [
+                    {
+                        "name": "appGatewayBackendHttpSettings",
+                        "properties": {
+                            "Port": 443,
+                            "Protocol": "Https",
+                            "CookieBasedAffinity": "Disabled",
+                            "pickHostNameFromBackendAddress": true,
+                            "path": "/",
+                            "connectionDraining": {
+                                "enabled": true,
+                                "drainTimeoutInSec": 30
+                            },
+                            "probe": {
+                                "id": "[concat(variables('applicationGatewayID'), '/probes/httpsRootProbe')]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "appGatewayBackendHttpSettingsWithStatusProbe",
+                        "properties": {
+                            "Port": 443,
+                            "Protocol": "Https",
+                            "CookieBasedAffinity": "Disabled",
+                            "pickHostNameFromBackendAddress": true,
+                            "path": "/",
+                            "connectionDraining": {
+                                "enabled": true,
+                                "drainTimeoutInSec": 30
+                            },
+                            "probe": {
+                                "id": "[concat(variables('applicationGatewayID'), '/probes/httpsStatusProbe')]"
+                            }
+                        }
+                    }
+                ],
+                "httpListeners": [
+                    {
+                        "name": "dockerListener",
+                        "properties": {
+                            "FrontendIPConfiguration": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendIPConfigurations/appGatewayFrontendIP')]"
+                            },
+                            "FrontendPort": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendPorts/httpsFrontendPort')]"
+                            },
+                            "Protocol": "Https",
+                            "SslCertificate": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/sslCertificates/appGatewayFrontEndSslCert')]"
+                            },
+                            "requireServerNameIndication": true,
+                            "hostName": "[concat('docker-', parameters('environmentName'), '.', parameters('dnsZoneName'))]"
+                        }
+                    },
+                    {
+                        "name": "httpsListener",
+                        "properties": {
+                            "FrontendIPConfiguration": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendIPConfigurations/appGatewayFrontendIP')]"
+                            },
+                            "FrontendPort": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendPorts/httpsFrontendPort')]"
+                            },
+                            "Protocol": "Https",
+                            "SslCertificate": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/sslCertificates/appGatewayFrontEndSslCert')]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "httpListener",
+                        "properties": {
+                            "FrontendIPConfiguration": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendIPConfigurations/appGatewayFrontendIP')]"
+                            },
+                            "FrontendPort": {
+                                "Id": "[concat(variables('applicationGatewayID'), '/frontendPorts/httpFrontendPort')]"
+                            },
+                            "Protocol": "Http"
+                        }
+                    }
+                ],
+                "redirectConfigurations": [
+                    {
+                        "name": "httpToHttps",
+                        "properties": {
+                            "redirectType": "Permanent",
+                            "targetListener": {
+                                "id": "[concat(variables('applicationGatewayID'), '/httpListeners/httpsListener')]"
+                            },
+                            "includePath": true,
+                            "includeQueryString": true
+                        }
+                    }
+                ],
+                "urlPathMaps": [
+                    {
+                        "name": "applicationMap",
+                        "properties": {
+                            "defaultBackendAddressPool": {
+                                "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoWebBackendPool')]"
+                            },
+                            "defaultBackendHttpSettings": {
+                                "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                            },
+                            "pathRules": [
+                                {
+                                    "name": "pathToAdmin",
+                                    "properties": {
+                                        "paths": [
+                                            "/admin/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/authAdminBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToAuth",
+                                    "properties": {
+                                        "paths": [
+                                            "/auth/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/authServiceBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToOfficeHelp",
+                                    "properties": {
+                                        "paths": [
+                                            "/office-help*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/officeHelpBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToOffice",
+                                    "properties": {
+                                        "paths": [
+                                            "/office*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoOfficeBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToGateway",
+                                    "properties": {
+                                        "paths": [
+                                            "/gateway/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoApiBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToEventBroker",
+                                    "properties": {
+                                        "paths": [
+                                            "/event-broker/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoEventBrokerBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToCalendarSync",
+                                    "properties": {
+                                        "paths": [
+                                            "/calendar-sync/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoCalendarSyncBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                },
+                                {
+                                    "name": "pathToTools",
+                                    "properties": {
+                                        "paths": [
+                                            "/tools/*"
+                                        ],
+                                        "backendAddressPool": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/gizmoToolsBackendPool')]"
+                                        },
+                                        "backendHttpSettings": {
+                                            "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettings')]"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "requestRoutingRules": [
+                    {
+                        "name": "httpToHttps",
+                        "properties": {
+                            "ruleType": "Basic",
+                            "httpListener": {
+                                "id": "[concat(variables('applicationGatewayID'), '/httpListeners/httpListener')]"
+                            },
+                            "redirectConfiguration": {
+                                "id": "[concat(variables('applicationGatewayID'), '/redirectConfigurations/httpToHttps')]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "dockerRouting",
+                        "properties": {
+                            "ruleType": "Basic",
+                            "httpListener": {
+                                "id": "[concat(variables('applicationGatewayID'), '/httpListeners/dockerListener')]"
+                            },
+                            "backendAddressPool": {
+                                "id": "[concat(variables('applicationGatewayID'), '/backendAddressPools/dockerProxyBackendPool')]"
+                            },
+                            "backendHttpSettings": {
+                                "id": "[concat(variables('applicationGatewayID'), '/backendHttpSettingsCollection/appGatewayBackendHttpSettingsWithStatusProbe')]"
+                            }
+                        }
+                    },
+                    {
+                        "name": "pathBasedRouting",
+                        "properties": {
+                            "RuleType": "PathBasedRouting",
+                            "httpListener": {
+                                "id": "[concat(variables('applicationGatewayID'), '/httpListeners/httpsListener')]"
+                            },
+                            "urlPathMap": {
+                                "id": "[concat(variables('applicationGatewayID'), '/urlPathMaps/applicationMap')]"
+                            }
+                        }
+                    }
+                ],
+                "webApplicationFirewallConfiguration": {
+                    "enabled": true,
+                    "firewallMode": "Detection",
+                    "ruleSetType": "OWASP",
+                    "ruleSetVersion": "3.0",
+                    "maxRequestBodySizeInKb": 128
+                }
+            },
+            "resources": [
+                {
+                    "type": "providers/diagnosticSettings",
+                    "name": "Microsoft.Insights/iaMonitoring",
+                    "dependsOn": [
+                        "[variables('applicationGatewayName')]"
+                    ],
+                    "apiVersion": "2017-05-01-preview",
+                    "properties": {
+                        "name": "iaMonitoring",
+                        "workspaceId": "[resourceId('bf988e23-7a52-464f-8529-607f1571711d', 'monitoring', 'microsoft.operationalinsights/workspaces', parameters('logAnalyticsWorkspace'))]",
+                        "logs": [
+                            {
+                                "category": "ApplicationGatewayAccessLog",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            },
+                            {
+                                "category": "ApplicationGatewayPerformanceLog",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            },
+                            {
+                                "category": "ApplicationGatewayFirewallLog",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "days": 0,
+                                    "enabled": false
+                                }
+                            }
+                        ],
+                        "metrics": [
+                            {
+                                "category": "AllMetrics",
+                                "enabled": true,
+                                "retentionPolicy": {
+                                    "enabled": false,
+                                    "days": 0
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "type": "Microsoft.Resources/deployments",
+            "name": "[concat('nested-dns-', deployment().name)]",
+            "resourceGroup": "dns",
+            "subscriptionId": "bf988e23-7a52-464f-8529-607f1571711d",
+            "apiVersion": "2017-05-10",
+            "dependsOn": [
+                "[variables('applicationGatewayName')]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "template": {
+                    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {},
+                    "variables": {},
+                    "resources": [
+                        {
+                            "type": "Microsoft.Network/dnszones/A",
+                            "name": "[concat(parameters('dnsZoneName'), '/', parameters('environmentName'))]",
+                            "apiVersion": "2018-05-01",
+                            "properties": {
+                                "TTL": 3600,
+                                "targetResource": {
+                                    "id": "[resourceId(subscription().subscriptionId, resourceGroup().name, 'Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+                                }
+                            }
+                        },
+                        {
+                            "type": "Microsoft.Network/dnszones/A",
+                            "name": "[concat(parameters('dnsZoneName'), '/', 'docker-', parameters('environmentName'))]",
+                            "apiVersion": "2018-05-01",
+                            "properties": {
+                                "TTL": 3600,
+                                "targetResource": {
+                                    "id": "[resourceId(subscription().subscriptionId, resourceGroup().name, 'Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

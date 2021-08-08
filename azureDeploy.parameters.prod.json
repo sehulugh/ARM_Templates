@@ -1,0 +1,29 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters":{
+        "storagePrefix": {
+            "type": "string",
+            "minLength":3,
+            "maxLength":24
+        },
+        "storageSKU": {
+            "type": "string",
+            "defaultValue":"Standard_GRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_RAGRS",
+                "Standard_ZRS"
+            ]
+        },
+        "resourceTags": {
+            "type": "object",
+            "defaultValue": {
+                "Environment":"Dev",
+                "Project":"Tutorial"
+            }
+        }
+    }
+
+}

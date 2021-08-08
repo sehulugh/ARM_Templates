@@ -1,4 +1,4 @@
-## Createing ARM Templates
+## Creating ARM Templates
 ---
 ### Powershell Scripts
 [Docs](https://docs.microsoft.com/en-us/azure/azure-resource-manager/templates/overview)
@@ -152,3 +152,168 @@ Below we use a function to get the resourcegroup's location and use it for our r
 ```
 Powershell script same as in [Add Paramteters](#addParameters) section
 ### Add Variables
+Variables enable you to write an expression once and reuse it through out your template, can help with creating unique names for resources
+**Snippet**
+```json
+"parameters":{
+        "storagePrefix": {
+            "type": "string",
+            "minLength":3,
+            "maxLength":24
+        },
+        "location": {
+            "type": "string",
+            "defaultValue":"[resourceGroup().location]"
+        }
+        ...
+    "variables": {
+        "uniqueStorageName":"[concat(parameters('storagePrefix'), uniqueString(resourceGroup().id))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-04-01",
+            "name": "[variables('uniqueStorageName')]",
+            "location": "[parameters('location')]",
+            ...
+        }
+    ]
+```
+**PowerShell Script**
+```powerShell
+New-AzResourceGroupDeployment `
+  -Name sesughdemostorage `
+  -ResourceGroupName myResourceGroup `
+  -TemplateFile $templateFile
+  -storagePrefix "store"
+```
+| Function | Description |
+| ---- | ---------- |
+|`resourceGroup()` | returns propeties of resource group  eg Id, location|
+|`concat(var1,var2)` | concatenates strings |
+|`variables('variableName')` | returns value of variableName |
+|`parameters('parametername')` | returns value of parameter |
+> Variable VS Parameter
+> Variable is used when we want to build an expression typically using functions and parameters, when a user specifies the parameter, it is passed into the variable and the result passed to the resource property
+### Add Outputs
+You use output when you need a value from a deployed resource eg getting the endpoint of a new storage account, typically added after resource
+**Snippet**
+```json
+"parameters":{
+        "storagePrefix": {
+            "type": "string",
+            "minLength":3,
+            "maxLength":24
+        },
+        "location": {
+            "type": "string",
+            "defaultValue":"[resourceGroup().location]"
+        }
+        ...
+    "variables": {
+        "uniqueStorageName":"[concat(parameters('storagePrefix'), uniqueString(resourceGroup().id))]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-04-01",
+            "name": "[variables('uniqueStorageName')]",
+            "location": "[parameters('location')]",
+            ...
+        }
+    ],
+    "outputs": {
+        "storageEndpoint": {
+            "type": "object",
+            "value": "[reference(variables('uniqueStorageName')).primaryEndpoints]"
+        }
+    }
+```
+**PowerShell Script**
+```powerShell
+New-AzResourceGroupDeployment `
+  -Name sesughdemostorage `
+  -ResourceGroupName myResourceGroup `
+  -TemplateFile $templateFile
+  -storagePrefix "store"
+```
+In the case of storge accounts, the output returns a json
+| Function | Description |
+| ---- | ---------- |
+|`reference(resourceName/resourceID|)` | get the runtime state of a resource|
+> To view Deployments, log into Azure Portal, select the resource group and click on deployments menu
+### Add Tags
+Tags help you logically organise your resources, they are added as parameters with types as object
+**Snippet**
+```json
+"parameters":{
+      ...
+      "location": {
+          "type": "string",
+          "defaultValue":"[resourceGroup().location]"
+      }, 
+      "resourceTags": {
+          "type": "object",
+          "defaultValue": {
+              "Environment":"Dev",
+              "Project":"Tutorial"
+          }
+      }
+    },
+    "resources": [
+        {
+           ...
+            "location": "[parameters('location')]",
+            "tags": "[parameters('resourceTags')]"
+          ...
+        }
+    ]
+```
+### Using parmeter files
+Parameter files can help you prepopulate your values rather than adding them inside your PowerShell script (inline method)
+Note that the schema is different from ARM template file
+**Snippet**
+```json
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters":{
+        "storagePrefix": {
+            "type": "string",
+            "minLength":3,
+            "maxLength":24
+        },
+        "storageSKU": {
+            "type": "string",
+            "defaultValue":"Standard_GRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Standard_RAGRS",
+                "Standard_ZRS"
+            ]
+        },
+        "resourceTags": {
+            "type": "object",
+            "defaultValue": {
+                "Environment":"Dev",
+                "Project":"Tutorial"
+            }
+        }
+    }
+
+}
+```
+**PowerShell script**
+```powershell
+$templateFile = "{path-to-the-template-file}"
+$parameterFile="{path-to-azuredeploy.parameters.dev.json}"
+New-AzResourceGroup `
+  -Name myResourceGroupDev `
+  -Location "East US"
+New-AzResourceGroupDeployment `
+  -Name devenvironment `
+  -ResourceGroupName myResourceGroupDev `
+  -TemplateFile $templateFile `
+  -TemplateParameterFile $parameterFile
+```

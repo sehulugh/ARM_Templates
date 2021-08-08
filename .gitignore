@@ -1,7 +1,7 @@
 # ignore these files
-app-gateway-waf-v1.json
-app-gateway-waf-v2.json
-teamsAppService_copy.json
-teamsAppService.json
-teamsAppStorage.json
-to_delete.json
+templates\app-gateway-waf-v1.json
+templates\app-gateway-waf-v2.json
+templates\teamsAppService_copy.json
+templates\teamsAppService.json
+templates\teamsAppStorage.json
+templates\to_delete.json
